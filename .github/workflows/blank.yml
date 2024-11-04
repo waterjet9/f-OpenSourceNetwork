@@ -1,0 +1,60 @@
+name: CI
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - name: Download Ngrok
+      run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+    - name: Extract Ngrok
+      run: Expand-Archive ngrok.zip
+    - name: Ngrok Auth
+      run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+      env:
+        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+
+    # Commenting out Ngrok-related steps
+     - name: Create Tunnel
+       run: .\ngrok\ngrok.exe tcp 3389
+
+    - name: Enable TS
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+    - name: Enable Firewall Rule
+      run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    - name: Enable User Auth
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+    - name: Set Local User Password
+      run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText $Env:ADMIN_PASSWORD -Force)
+      env:
+        ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+
+    - name: Install Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+
+    - name: Download Reemo Setup
+      run: Invoke-WebRequest https://download.reemo.io/reemo.setup.x64.exe -OutFile reemo.setup.x64.exe
+    
+    - name: Install Reemo
+      run: .\reemo.setup.x64.exe /quiet /norestart
+
+    - name: Create and Modify Reemo Configuration
+      run: |
+        $configPath = 'C:\Program Files\Reemo\service\reemo.ini'
+        if (-Not (Test-Path $configPath)) {
+            New-Item -ItemType File -Path $configPath
+        }
+        Add-Content -Path $configPath -Value "[auth]`ntoken-$Env:REMIO_KEY"
+      env:
+        REMIO_KEY: ${{ secrets.REMIO_KEY }}
+
+    - name: Start Reemo Service
+      run: Start-Service -Name 'ReemoService' # Adjust the service name as needed
+
+    - name: Run Tests
+      run: npm test
